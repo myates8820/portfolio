@@ -34,6 +34,8 @@ def update_task_database(data,full_reset):
     # authorizing gspread
     token = os.environ['sheets_token']
     scopes = ['https://spreadsheets.google.com/feeds']
+
+
     creds_dict = json.loads(token)
     creds_dict["private_key"] = creds_dict["private_key"].replace("\\\\n", "\n")
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scopes)
@@ -81,13 +83,15 @@ def update_task_database(data,full_reset):
         conn.close()
         return data
 
-
+    start_date = datetime.datetime(2019,1,1)
     all_deals_df = pd.DataFrame(data=data[1::],columns = data[0])
     all_deals_df = all_deals_df[all_deals_df.project_sunrise_id.isnull()==False]
     all_deals_df['project_sunrise_id'] = all_deals_df['project_sunrise_id'].apply(lambda x: str(x).replace(',',''))    
-    sold_df = all_deals_df[(all_deals_df.closed_by_proposal_tool == 'Yes') & (all_deals_df.dealstage == 'Closed Won')].copy()
+    sold_df = all_deals_df[(all_deals_df.closed_by_proposal_tool == 'Yes') & ((all_deals_df.dealstage == 'Closed Won') | (all_deals_df.dealstage == 'Closed Lost'))].copy()
+    sold_df['closedate'] = pd.to_datetime(sold_df['closedate'],errors='coerce')
+    sold_df = sold_df[sold_df.closedate >= start_date]
     sold_df = sold_df[['hs_object_id','project_sunrise_id','dealname','closedate','appointment_date','amount_in_home_currency','system_size','payment_option',
-                    'module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','utility','market_region','hold_type']]
+                    'module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','utility','market_region','hold_type','dealstage','closed_lost_date']]
     sold_df.drop_duplicates(subset='project_sunrise_id',inplace=True)
     sold_df_list = sold_df.values.tolist()
     data_columns = sold_df.columns.tolist()
@@ -100,27 +104,18 @@ def update_task_database(data,full_reset):
 
     # getting columns from table and stripping task_df to these columns in later element. Must make sure to 
     conn = engine.connect()
-    existing_projects = []
     s = select([tasks_wide])
     result = conn.execute(s)
     table_keys = result.keys()
 
-    projects_query = """ SELECT [cols] FROM [table] """
+    projects_query = """ SELECT [cols] FROM [table] WHERE close_project_completed IS NOT NULL"""
     projects_list = [list(x) for x in query_selector(projects_query,table_keys, 'tasks_wide')]
     projects_df = pd.DataFrame(data=projects_list[1::],columns=projects_list[0])
     close_project_index = projects_df.columns.tolist().index('close_project_completed')
     sunrise_id_index = projects_df.columns.tolist().index('project_sunrise_id')
     projects_df['project_sunrise_id'] = projects_df['project_sunrise_id'].apply(lambda x: str(x))
-    finished_df = projects_df[projects_df.close_project_completed.isnull()==False].copy()
 
-    # grabbing id lists
-    project_ids = projects_df['project_sunrise_id'].values.tolist()
-    update_ids = projects_df[projects_df.close_project_completed.isnull()]['project_sunrise_id'].values.tolist()
-    finished_ids = finished_df['project_sunrise_id'].values.tolist()
-    new_ids = []
-    for x in sold_df_list:
-        if x[sunrise_id_index] not in project_ids:
-            new_ids.append(x[sunrise_id_index])
+    finished_ids = projects_df['project_sunrise_id'].values.tolist()
 
 
     url_base = os.environ['sunrise_alltasks_base']
@@ -128,36 +123,43 @@ def update_task_database(data,full_reset):
     org_key = os.environ['sunrise_org_key']
     headers = {'api-key': api_key}
 
-    # if true, will wipe database of all rows and upload from scratch. good for data quality and new column resets
-    if full_reset:
-        conn.execute("TRUNCATE TABLE tasks_wide")
-        sunrise_list = sold_df_list
-    else:
-        # Uncomment if go the finished_list route
-        sunrise_list = []
-        raw_sold_df = sold_df_list
-        for x in raw_sold_df:
-            if x[sunrise_id_index] not in finished_ids:
-                sunrise_list.append(x)
-    
-    print("Sunrise grab started.")            
+
+    sunrise_list = []
+    raw_sold_df = sold_df_list
+    for x in raw_sold_df:
+        if x[sunrise_id_index] not in finished_ids:
+            sunrise_list.append(x)
+
+    print("Sunrise Grab Started.")
+    failures = []     
+    failure_responses = []
     sunrise_data = []        
     for x in sunrise_list:
-        try:
-            lead_id = x[sunrise_id_index]
-            url = url_base.replace('{orgId}',org_key).replace('{project_id}',lead_id)
-            r = requests.get(url = url, headers = headers)
-            owner_response = json.loads(r.text)
-            sleep(0.1)
-            task_array = owner_response['body']['tasks']
-            if task_array:
-                x.append({'tasks': task_array})
-            else:
+        try_count = 0
+        while try_count<3:
+            try:
+                lead_id = x[sunrise_id_index]
+                url = url_base.replace('{orgId}',org_key).replace('{project_id}',lead_id)
+                r = requests.get(url = url, headers = headers)
+                owner_response = json.loads(r.text)
+                sleep(0.1)
+                task_array = owner_response['body']['tasks']
+                if task_array:
+                    x.append({'tasks': task_array})
+                else:
+                    x.append({'tasks':['No Project Found']})
+                sunrise_data.append(x)
+                break
+            except Exception as e:
+                try_count+=1
+        if try_count == 3:
+            try:
                 x.append({'tasks':['No Project Found']})
-            sunrise_data.append(x)
-        except:
-            sunrise_data.append({'tasks':['Error']})
-            print(x)    
+                sunrise_data.append(x)
+                failures.append(x)
+                failure_responses.append(json.loads(r.text))        
+            except Exception as e:
+                print(e) 
 
     print("Sunrise grab completed.")
     df = pd.DataFrame(columns = ['hs_object_id','project_sunrise_id','dealname','task_dates'])
@@ -199,9 +201,8 @@ def update_task_database(data,full_reset):
                         task_dictionary[x+'_completed_by'] = None
             project.pop()
             project.append(task_dictionary)
-        except:
-            print(project[1])
-            print('Error')
+        except Exception as e:
+            print(e)
 
 
     full_task_list = []
@@ -266,55 +267,139 @@ def update_task_database(data,full_reset):
 
     # getting all columns from df and putting into list. create dictionary in order to get locations of different columns. Makes adding new columns much easier to manage
     sql_columns = task_df.columns.tolist()
+    columns_tuple = tuple(sql_columns)
     column_dictionary = {}
     for x in sql_columns:
         column_dictionary[x] = sql_columns.index(x)
 
-    # creating list of row value dictionaries
-    row_values = []
-    row_length = len(sql_columns)
-    for row in task_values_list:
-        row_dictionary = {}
-        for i in range(0,row_length):
-            row_dictionary[sql_columns[i]] = row[i]
-        row_values.append(row_dictionary)
+    # creating list of row value dictionaries, for old way
+    # row_values = []
+    # row_length = len(sql_columns)
+    # for row in task_values_list:
+    #     row_dictionary = {}
+    #     for i in range(0,row_length):
+    #         row_dictionary[sql_columns[i]] = row[i]
+    #     row_values.append(row_dictionary)
+
+    upload_conn = psycopg2.connect(database=db_database, user=db_user, 
+                        password = db_password,
+                        host = db_host)
+
+
+    upload_cursor = upload_conn.cursor()
+    print("before execute")
+    upload_cursor.execute("""DELETE FROM tasks_wide
+                            WHERE project_sunrise_id IN (
+                                SELECT project_sunrise_id
+                                WHERE close_project_completed IS NULL);""")
+    upload_conn.commit()
+    conn.close()
+    print("Deleted Successfully")
+
+    import time
+    time.sleep(10)
+
+    # batch updater, can increase batch number by increasing pagination length but no issues for now
+
+    # first grabbing iteration function
+    # lifted iterator code from following article --> https://hakibenita.com/fast-load-data-python-postgresql
+
+    from typing import Iterator, Optional
+    import io
+
+    class StringIteratorIO(io.TextIOBase):
+        def __init__(self, iter: Iterator[str]):
+            self._iter = iter
+            self._buff = ''
+
+        def readable(self) -> bool:
+            return True
+
+        def _read1(self, n: Optional[int] = None) -> str:
+            while not self._buff:
+                try:
+                    self._buff = next(self._iter)
+                except StopIteration:
+                    break
+            ret = self._buff[:n]
+            self._buff = self._buff[len(ret):]
+            return ret
+
+        def read(self, n: Optional[int] = None) -> str:
+            line = []
+            if n is None or n < 0:
+                while True:
+                    m = self._read1()
+                    if not m:
+                        break
+                    line.append(m)
+            else:
+                while n > 0:
+                    m = self._read1(n)
+                    if not m:
+                        break
+                    n -= len(m)
+                    line.append(m)
+            return ''.join(line)
 
     print('Task DB Update Started')
 
-    # wipe table for executemany insert. switch over to executemany for update and insert in future
-    # conn.execute("TRUNCATE TABLE tasks_wide")
-    # conn.execute(tasks_wide.insert(),row_values)
+    upload_conn = psycopg2.connect(database=db_database, user=db_user, 
+                            password = db_password,
+                            host = db_host)
 
-    # later switch to executemany method if too slow. for current moment, volume is low enough 
 
-    print("FSP_SQL Update Started")
-    for row in row_values:
-        try:
-            if row['project_sunrise_id'] in project_ids:
-                upd = tasks_wide.update().where(tasks_wide.c.project_sunrise_id == row['project_sunrise_id']).values(row)
-                conn.execute(upd)
+    try:
+        # modified function from above link, simplified to work with paginated list and structure instead of dictionaries
+        def string_io_iterator(connection,table,columns,rows: Iterator[list]) -> None:
+            with connection.cursor() as cursor:
+                    beers_string_iterator = StringIteratorIO((
+                        row + '\n'
+                        for row in rows
+                    ))
+                    cursor.copy_from(beers_string_iterator,table,columns=columns,sep=";", null='missing_data')
+                    connection.commit()
+
+        # quick loop to enable pagination for the upload
+        item_number = 0
+        full_length = len(task_values_list)
+        final_page = False
+        paginate = True
+        while paginate:
+            
+            pagination_length = 50
+            end_number = item_number+pagination_length
+            if end_number>=full_length:
+                end_index = full_length
+                final_page = True
             else:
-                ins = tasks_wide.insert().values(row)
-                conn.execute(ins)
-        except Exception as e:
-            print(row)
-            print(e)
-    print("FSP SQL Updated.")
+                end_index = end_number
+            # print(end_index)
+                
+            value_list = []
+            for x in task_values_list[item_number:end_index]:
+                string_row = []
+                for i in x:
+                    if i is None:
+                        string_row.append('missing_data')
+                    else:
+                        string_row.append(str(i).replace(';',':')) #need to fix any instances of ; so it doesn't break the delimiter
+                row = ";".join(string_row)
+                value_list.append(str(row))
+                
+            string_io_iterator(upload_conn,'tasks_wide',columns_tuple,value_list)
+            
+            if final_page:
+                paginate=False
+            else:
+                item_number+=pagination_length
+    except:
+        print('Task DB Upload Failed')
 
-    # old execute method.
-    # for row in row_values:
-    #     if row['project_sunrise_id'] in existing_projects:
-    #         upd = tasks_wide.update().where(tasks_wide.c.project_sunrise_id == row['project_sunrise_id']).values(row)
-    #         conn.execute(upd)
-    #     else:
-    #         ins = tasks_wide.insert().values(row)
-    #         conn.execute(ins)
 
     # adding finished_df back to task df
-    if full_reset:
-        pass
-    else:
-        task_df = pd.concat([finished_df,task_df],ignore_index=True)
+
+    task_df = pd.concat([projects_df,task_df],ignore_index=True)
 
 
     metrics_columns = ['project_sunrise_id','dealname','appointment_date','signed_contract_completed','closedate','confirm_deposit_received_completed','complete_site_assessment_completed',
@@ -324,21 +409,21 @@ def update_task_database(data,full_reset):
                     'schedule_installation_created','schedule_installation_completed','crew_installation_complete_completed','complete_city_inspection_completed',
                     'complete_utility_inspection_completed','close_project_completed','schedule_installation_raw','installation_complete_raw','appointment_to_contract','contract_to_design','contract_to_install',
                     'system_size','amount_in_home_currency','payment_option','module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','hours','hold_type','utility',
-                    'market_region']
+                    'market_region','dealstage','closed_lost_date']
 
     metrics_date_columns = ['appointment_date','signed_contract_completed','closedate','confirm_deposit_received_completed','complete_site_assessment_completed',
                     'upload_design_packet_construction_set_completed','submit_architectural_improvement_request_completed','submit_permit_application_completed',
                     'submit_interconnection_application_completed','submit_utility_rebate_application_completed','all_submit_date','upload_architectural_improvement_request_approval_completed',
                     'upload_permit_application_approval_completed','upload_interconnection_application_approval_completed','upload_utility_rebate_application_approval_completed','all_approve_date',
                     'schedule_installation_created','schedule_installation_completed','crew_installation_complete_completed','complete_city_inspection_completed',
-                    'complete_utility_inspection_completed','close_project_completed','schedule_installation_raw','installation_complete_raw']
+                    'complete_utility_inspection_completed','close_project_completed','schedule_installation_raw','installation_complete_raw','closed_lost_date']
 
 
     # making a copy to keep Metrics sheet up and running. Eventually will convert everything to fsp_sql, but intermediate stages
     metrics_df = task_df.copy()
     metrics_df.drop_duplicates(subset='project_sunrise_id',inplace=True)
     for x in metrics_date_columns:
-        metrics_df[x] = pd.to_datetime(metrics_df[x],errors='coerce')
+        metrics_df[x] = pd.to_datetime(metrics_df[x].fillna(pd.NaT),errors='coerce')
 
     metrics_df = metrics_df[metrics_columns].sort_values(by='closedate').copy()
 
@@ -353,10 +438,18 @@ def update_task_database(data,full_reset):
         metrics_df[x] = metrics_df[x].dt.strftime('%m/%d/%Y').apply(date_converter)
         
     metrics_df.fillna('',inplace=True)
+    # correcting for some dtype issues in sheets upload
+    for x in ['system_size','amount_in_home_currency','module_quantity']:
+        metrics_df[x] = metrics_df[x].replace('',0.0)
+        metrics_df[x] = metrics_df[x].fillna(0.0)
+        metrics_df[x] = metrics_df[x].astype('float64')
+    metrics_df.fillna('',inplace=True)
+
+
 
     sheet_id = os.environ['metrics_sheet_id']
     ws = client.open_by_key(sheet_id).worksheet('Project Data')
-    client.open_by_key(sheet_id).values_clear("Appointments Export!A:AN")
+    client.open_by_key(sheet_id).values_clear("Project Data!A:AP")
 
     ws.update([metrics_df.columns.values.tolist()] + metrics_df.values.tolist(), value_input_option="USER_ENTERED")
 
