@@ -11,18 +11,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from subfunctions.deal_parser import map_deals_list
 from subfunctions.data_tests.deposit_integration_checker import deposit_integration_check
-from subfunctions.tasks_db_updater import update_task_database
 
 hs_api_key = os.environ['hapikey']
-
-contact_tries = 0
-while contact_tries < 3:
-    try:
-        contacts_grab.run_grab()
-        break
-    except:
-        contact_tries+=1
-        sleep(60)
 
 print('Deal Updater Started')
 
@@ -42,14 +32,11 @@ all_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage
                         'send_deposit_to_accounting','matt_deposit_check','project_sunrise_id','deposit_sent_integration_failure',
                         'hold_type','powerwall_only','payment_option']            
 
-hubspot = HubspotApi(hs_api_key)
-results = hubspot.get_all_deals(all_properties)
-deal_list_raw = hubspot.parse_deals()
-deal_list = map_deals_list(deal_list_raw)
+# hubspot = HubspotApi(hs_api_key)
+# results = hubspot.get_all_deals(all_properties)
+# deal_list_raw = hubspot.parse_deals()
+# deal_list = map_deals_list(deal_list_raw)
 
-print('Deals have been parsed.')
+# print('Deals have been parsed.')
 
-deals_grab.run_grab(deal_list)
-deposit_integration_check(deal_list)
-# update_task_database(deal_list,full_reset=False)
-# run_tests()
+deposit_integration_check()

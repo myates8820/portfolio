@@ -1,68 +1,33 @@
-import pickle
-import os.path
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import pathlib
-import csv
-import numpy as np
-import pandas as pd
-import datetime
-from time import sleep
-import time
-import sys, os
-import math
-
-import requests
-import json
+import os
 from subfunctions.Hubspot_API import HubspotApi
 from subfunctions.deal_parser import map_deals_list
 
-def run_grab(all_deals):
-
-
-    import pickle
-    import os.path
-    from googleapiclient.discovery import build
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
+def run_grab():
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
-    import pathlib
-    import csv
     import numpy as np
     import pandas as pd
     import datetime
     from time import sleep
-    import time
-    import sys, os
-    import math
+    import os
+    import psycopg2
+    from typing import Iterator, Optional
+    import io
 
-    import requests
     import json
-    from subfunctions.Hubspot_API import HubspotApi
-    from subfunctions.deal_parser import map_deals_list
+    from sqlalchemy import create_engine, Table, Column, Integer, String, MetaData, Date, DateTime, Float, Boolean, BigInteger
 
     print('Function started')
+
+    from all_properties import all_properties 
 
     #Grabbing API key from environment
     api_key = os.environ['hapikey']
 
-    # owner_url = "https://api.hubapi.com/owners/v2/owners?hapikey="+api_key
+    #creating sqlalchemy engine for creating tables
+    engine = create_engine(os.environ['sql_alchemy_conn_string'], echo=False)
+    meta = MetaData()
 
-    # r = requests.get(url = owner_url)
-
-    # owner_response = json.loads(r.text)
-    # owner_dict = [('','')]
-    # for x in owner_response:
-    #     owner_dict.append((str(x['ownerId']),x['firstName']+' '+x['lastName']))
-
-        
-    # owner_dict = dict(owner_dict)
-
-    print('Owners have been retrieved.')
 
     token = os.environ['sheets_token']
     scopes = ['https://spreadsheets.google.com/feeds']
@@ -82,71 +47,37 @@ def run_grab(all_deals):
 
     print('EC regions have been retrieved.')
 
+    def query_selector(query,cols,table):
+        conn = psycopg2.connect(database=os.environ['database'], user=os.environ['user'], 
+                            password = os.environ['password'],
+                            host = os.environ['host'])
+        cur = conn.cursor()
+        cur.execute("rollback;")
 
-    #section for once db has updater fixed by David
-    import psycopg2
+        if cols == '*':
+            final_query = "SELECT * FROM [table]"
+            final_query = final_query.replace('[table]', table)
+            col_query = "Select * FROM [table] LIMIT 0"
+            cur.execute(col_query.replace('[table]',table))
+            colnames = [desc[0] for desc in cur.description]
+        else:
+            query_build = ', '.join(cols)
+            final_query = query.replace('[cols]', query_build).replace('[table]', table)
+            colnames = cols
+        cur.execute(final_query)
+        data = cur.fetchall()
+        data.insert(0,tuple(colnames))
+        cur.close()
+        conn.close()
+        return data
 
-    # db_database = os.environ['database']
-    # db_user = os.environ['user']
-    # db_password = os.environ['password']
-    # db_host = os.environ['host']
+    deal_query = """SELECT [cols] FROM [table]"""
+    deal_list = query_selector(deal_query,'*','full_cleaned')
+    df = pd.DataFrame(data=deal_list[1::],columns=deal_list[0]).fillna('')
+    # deal_list = all_deals       
 
-    # # will load in environmental variables once David updates db
-    # conn = psycopg2.connect(database=db_database, user=db_user, 
-    #                         password = db_password,
-    #                         host = db_host)
-
-    # cur = conn.cursor()
-    # cur.execute("rollback;")
-    # query = """ SELECT owner_id FROM owners """
-    # cur.execute(query)
-    # owner_list_full = cur.fetchall()
-    # current_owner_list = [x[0] for x in owner_list_full]
-    # quick_list_owners = owner_dict
-
-
-    # def test_eliminator(x):
-    #     if x.lower().find('test') >= 0:
-    #         return 1
-    #     else:
-    #         return 0
-
-
-    # all_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage','agent_name',
-    #                         'appointment_date','top_deal_sources','appointment_type','deal_lead_source',
-    #                         'deal_marketing_lead_category','hubspot_owner_id','dealtype',
-    #                         'market_region','run_status','appointment_ran_by','appointment_disposition','swf_lead_id',
-    #                         'closed_lost_notes','call_center_return_notes','closed_lost_reason','createdate',
-    #                         'has_been_rescheduled','closed_by_proposal_tool','module_type',
-    #                         'original_deal_owner','commission','system_size','tesla_powerwall_quantity','tesla_powerwall_revenue',
-    #                         'module_quantity','closed_lost_date','closedate','cc_notes_important',
-    #                         'call_center_reschedule_disposition','closed_won_reason','appointment_date_passed',
-    #                         'promotion_rebate','promotion_discount','sunpower_rebate_adder','financing_fees','mumd_promotion',
-    #                         'true_promotion','promotion_adder','cac_lead_source','cac_category_lead_source','full_promotion_true_paid_fsp',
-    #                         'full_promotion_total','full_promotion_mumd_fsp','sunpower_rebate_total','promotion_true_paid_by_fsp',
-    #                         'promotion_mumd_fsp','promotion_total','utility','canvasser_name','net_revenue','powerwall_split_portion','cash_loan',
-    #                         'send_deposit_to_accounting','matt_deposit_check','project_sunrise_id']    
-
-    # hubspot = HubspotApi(api_key)
-    # results = hubspot.get_all_deals(all_properties)
-    # deal_list_raw = hubspot.parse_deals()
-
-    #eliminating None objects and transforming them to ''
-
-    # deal_list = []
-    # for x in deal_list_raw:
-    #     line_item = []
-    #     for i in x:
-    #         if i is None:
-    #             line_item.append('')
-    #         else:
-    #             line_item.append(i)
-    #     deal_list.append(line_item)
-
-    deal_list = all_deals       
-
-    print('')    
-    print('Deals have been retrieved.')
+    # print('')    
+    # print('Deals have been retrieved.')
     # print(deal_list[0:2])
 
     # Area for selecting which columns to grab for each data upload
@@ -154,28 +85,35 @@ def run_grab(all_deals):
     appointment_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage','agent_name',
                             'appointment_date','top_deal_sources','appointment_type','deal_lead_source',
                             'canvasser_name','hubspot_owner_id','dealtype',
-                            'market_region','run_status','appointment_disposition','swf_lead_id',
+                            'market_region','run_status','appointment_disposition','project_sunrise_id',
                             'cac_lead_source','cac_category_lead_source','closed_lost_reason','createdate',
-                            'has_been_rescheduled','closed_by_proposal_tool']
+                            'has_been_rescheduled','closed_by_proposal_tool','powerwall_split_portion']
+
+    appointment_float_properties = ['amount_in_home_currency','run_number']
 
     sold_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage','closedate',
                     'appointment_date','appointment_type','market_region','hubspot_owner_id','module_type',
-                    'original_deal_owner','commission','run_status','swf_lead_id','system_size','cash_loan',
+                    'original_deal_owner','commission','run_status','project_sunrise_id','system_size','cash_loan',
                     'deal_lead_source','tesla_powerwall_quantity','tesla_powerwall_revenue','module_quantity',
                     'closed_lost_date','closed_by_proposal_tool','dealtype','financing_fees','full_promotion_true_paid_fsp','full_promotion_mumd_fsp',
-                    'promotion_total','sunpower_rebate_total','promotion_discount','cac_lead_source','cac_category_lead_source','net_revenue','powerwall_split_portion']
+                    'promotion_total','sunpower_rebate_total','promotion_discount','cac_lead_source','cac_category_lead_source',
+                    'net_revenue','powerwall_split_portion','adders_price','powerwall_only','send_deposit_to_accounting','utility',
+                    'payment_option','hold_type','adders_cost']
+
+    sold_float_properties = ['amount_in_home_currency','commission','system_size','tesla_powerwall_quantity','tesla_powerwall_revenue','module_quantity',
+                    'financing_fees','full_promotion_true_paid_fsp','full_promotion_mumd_fsp','adders_price','adders_cost',
+                    'promotion_total','sunpower_rebate_total','promotion_discount','net_revenue']
 
 
-    cancel_properties = ['hs_object_id','dealname','swf_lead_id','amount_in_home_currency','closedate','dealstage',
+    cancel_properties = ['hs_object_id','dealname','project_sunrise_id','amount_in_home_currency','closedate','dealstage',
                         'hubspot_owner_id','top_deal_sources','closed_lost_date','closed_lost_reason','closed_lost_notes',
                         'market_region','system_size','deal_lead_source','tesla_powerwall_quantity','tesla_powerwall_revenue',
                         'closed_by_proposal_tool','dealtype','cac_lead_source','cac_category_lead_source','financing_fees','net_revenue','original_deal_owner',
-                        'agent_name','canvasser_name']
+                        'agent_name','canvasser_name','powerwall_split_portion','powerwall_only']
 
-    cross_funnel_properties = ['associated_contact','hs_object_id','dealname','dealname','dealname','amount_in_home_currency','dealstage',
-                        'appointment_date','appointment_disposition','cc_notes_important','call_center_return_notes',
-                            'run_status','call_center_reschedule_disposition','closed_lost_reason','closed_lost_notes',
-                            'hubspot_owner_id','closed_by_proposal_tool','createdate','agent_name','dealtype']
+    cancel_float_properties = ['amount_in_home_currency','system_size','tesla_powerwall_quantity','tesla_powerwall_revenue',
+                        'financing_fees','net_revenue']
+
 
     # Add additional properties to additional_play_properties as ad hoc analyses call for, this way I don't need to mutilate the uploads to deal with non-essential requests
 
@@ -193,11 +131,14 @@ def run_grab(all_deals):
     now = datetime.datetime.now()
     today = datetime.datetime.strftime(now,'%Y-%m-%d')
     cd_year_cutoff = datetime.datetime(2020,1,1)
+    df_year_cutoff = datetime.datetime(2019,1,1)
 
     # handling missing and non-conforming data to be able to transform dataframes
 
     def null_handler(x):
         if x == '':
+            return 0
+        elif x is None:
             return 0
         else:
             return x
@@ -293,6 +234,119 @@ def run_grab(all_deals):
     #   Create csv export for local copy and for debugging
     #   Upload to google
 
+
+    # few more functions for cleaning and uploading
+    def id_handler(x):
+        if x is None or x == '':
+            return None
+        else:
+            return str(int(x))
+    
+    def float_converter(column_array,df):
+        for x in column_array:
+            df[x].fillna(0.0,inplace=True)
+            df[x] = df[x].apply(null_handler)
+            df[x] = df[x].apply(lambda x: str(x).replace(',',''))
+            df[x] = df[x].astype('float64')
+    
+    class StringIteratorIO(io.TextIOBase):
+        def __init__(self, iter: Iterator[str]):
+            self._iter = iter
+            self._buff = ''
+
+        def readable(self) -> bool:
+            return True
+
+        def _read1(self, n: Optional[int] = None) -> str:
+            while not self._buff:
+                try:
+                    self._buff = next(self._iter)
+                except StopIteration:
+                    break
+            ret = self._buff[:n]
+            self._buff = self._buff[len(ret):]
+            return ret
+
+        def read(self, n: Optional[int] = None) -> str:
+            line = []
+            if n is None or n < 0:
+                while True:
+                    m = self._read1()
+                    if not m:
+                        break
+                    line.append(m)
+            else:
+                while n > 0:
+                    m = self._read1(n)
+                    if not m:
+                        break
+                    n -= len(m)
+                    line.append(m)
+            return ''.join(line)
+
+
+    # takes sql table and matching df and uploads data. need to drop/clear table if already exists
+    def item_uploader(table_name,upload_df):
+    
+        df_values_list = upload_df.values.tolist()
+        df_columns = upload_df.columns.tolist()
+
+        upload_conn = psycopg2.connect(database=os.environ['database'], user=os.environ['user'], 
+                                password = os.environ['password'],
+                                host = os.environ['host'])
+
+
+        try:
+    #     modified function from above link, simplified to work with paginated list and structure instead of dictionaries
+            def string_io_iterator(connection,table,columns,rows: Iterator[list]) -> None:
+                with connection.cursor() as cursor:
+                        row_string_iterator = StringIteratorIO((
+                            row + '\n'
+                            for row in rows
+                        ))
+                        cursor.copy_from(row_string_iterator,table,columns=columns,sep=";", null='missing_data')
+                        connection.commit()
+
+            # quick loop to enable pagination for the upload
+            item_number = 0
+            full_length = len(df_values_list)
+            final_page = False
+            paginate = True
+            while paginate:
+
+                pagination_length = 500
+                end_number = item_number+pagination_length
+                if end_number>=full_length:
+                    end_index = full_length
+                    final_page = True
+                else:
+                    end_index = end_number
+                # print(end_index)
+
+                value_list = []
+                for x in df_values_list[item_number:end_index]:
+                    string_row = []
+                    for i in x:
+                        if i is None:
+                            string_row.append('missing_data')
+                        elif i == 'nan':
+                            string_row.append('missing_data')
+                        else:
+                            string_row.append(str(i).replace(';',':')) #need to fix any instances of ; so it doesn't break the delimiter
+                    row = ";".join(string_row)
+                    value_list.append(str(row))
+
+                string_io_iterator(upload_conn,table_name,df_columns,value_list)
+
+                if final_page:
+                    paginate=False
+                else:
+                    item_number+=pagination_length
+        except Exception as e:
+            print(e)
+
+    
+
     # creating function decorator to attempt each upload 3 times in case of timeouts, etc.
     def attempt_grabs(func):
         def wrapper_attempter():
@@ -301,9 +355,10 @@ def run_grab(all_deals):
                 try:
                     func()
                     break
-                except:
+                except Exception as e:
                     x+=1
-                    print(f'Attempt {x} failed.')
+                    print(f'Attempt {x} failed. The following errors was produced:')
+                    print(e)
                     print('Upload Failed. Sleeping for 60 seconds and starting again. Will attempt 3 times.')           
                     sleep(60)
         return wrapper_attempter
@@ -311,7 +366,7 @@ def run_grab(all_deals):
     @attempt_grabs
     def appointments_grab():
 
-        appointments_df = pd.DataFrame(data = deal_list[1::], columns=deal_list[0])
+        appointments_df = df.copy()
         appointments_df = appointments_df[appointment_properties]
         appointments_df.drop(appointments_df.index[appointments_df['appointment_date']==''],inplace=True)
 
@@ -320,13 +375,7 @@ def run_grab(all_deals):
         appointments_df['appointment_date'] = pd.to_datetime(appointments_df['appointment_date'],errors='coerce')
 
         # Removing all appointments from today to future, and all before 2020 to keep upload small
-        appointments_df.drop(appointments_df.index[appointments_df['appointment_date']>=today],inplace=True)
-        appointments_df.drop(appointments_df.index[appointments_df['appointment_date']<cd_year_cutoff],inplace=True)
-
-        # mapping owners and deal stages -- Needs to be updated if new deal stages are added
-        # appointments_df['hubspot_owner_id'] = appointments_df['hubspot_owner_id'].map(owner_dict)
-        # appointments_df['dealstage'] = appointments_df['dealstage'].map(deal_stage_map)
-        # appointments_df['appointment_ran_by'] = appointments_df['appointment_ran_by'].map(owner_dict)
+        appointments_df.drop(appointments_df.index[(appointments_df['powerwall_split_portion']=='Yes') & (appointments_df['closed_by_proposal_tool'] == 'Yes')],inplace=True)
 
         # Adding run number and reorganizing to match Sheets
         appointments_df['run_number'] = appointments_df['run_status'].apply(run_number)
@@ -336,11 +385,56 @@ def run_grab(all_deals):
         # removing columns and then sorting
         appointments_df.drop(['has_been_rescheduled'],axis=1,inplace=True)
         appointments_df.drop(['closed_by_proposal_tool'],axis=1,inplace=True)
+        appointments_df.drop(['powerwall_split_portion'],axis=1,inplace=True)
 
         appointments_df.sort_values(by='appointment_date',ascending=False,inplace=True)
 
+        appointments_df.replace({'nan': None,np.nan:None},inplace=True)
+        appointments_df['project_sunrise_id'] = appointments_df['project_sunrise_id'].apply(id_handler)
+        float_converter(appointment_float_properties,appointments_df)
+        appointments_df.replace({'nan': None,np.nan:None},inplace=True)
+
+        # creating engine and resetting table to upload data
+        engine = create_engine(os.environ['sql_alchemy_conn_string'], echo=False)
+        meta = MetaData()
+        with engine.connect() as conn:
+            conn.execute("DROP TABLE IF EXISTS appointments_cleaned;")
+
+        appointments_cleaned = Table(
+            'appointments_cleaned', meta,
+            Column('hs_object_id',BigInteger),
+            Column('dealname',String),
+            Column('amount_in_home_currency', Float),
+            Column('dealstage',String),
+            Column('agent_name',String),
+            Column('appointment_date',DateTime),
+            Column('top_deal_sources',String),
+            Column('appointment_type',String),
+            Column('deal_lead_source',String),
+            Column('canvasser_name',String),
+            Column('hubspot_owner_id',String),
+            Column('dealtype',String),
+            Column('market_region',String),
+            Column('run_status',String),
+            Column('run_number',Float),
+            Column('appointment_disposition',String),
+            Column('project_sunrise_id',BigInteger),
+            Column('cac_lead_source',String),
+            Column('cac_category_lead_source',String),
+            Column('closed_lost_reason',String),
+            Column('createdate',DateTime),
+            Column('powerwall_split_portion',String)
+            
+        )
+
+        meta.create_all(engine)
+        item_uploader('appointments_cleaned',appointments_df)
+
+        print ('Uploaded Cleaned Appointments Table')
 
         # Converting datetime objects to strings
+        appointments_df.drop(appointments_df.index[appointments_df['appointment_date']>=today],inplace=True)
+        appointments_df.drop(appointments_df.index[appointments_df['appointment_date']<cd_year_cutoff],inplace=True)
         appointments_df['createdate'] = appointments_df['createdate'].apply(date_to_string)
         appointments_df['appointment_date'] = appointments_df['appointment_date'].apply(date_to_string)
 
@@ -354,13 +448,255 @@ def run_grab(all_deals):
         ws.update([appointments_df.columns.values.tolist()] + appointments_df.values.tolist(), value_input_option="USER_ENTERED")
 
         print('Appointments have been uploaded.')
+        del appointments_df
 
     @attempt_grabs
     def sold_grab():
         # creating the separate dataframes for loading data. At a later point, need to modify for creating Tableau/SQL databases
         # Follows same structure as above with datetime objects and drop criteria
 
-        sold_df = pd.DataFrame(data = deal_list[1::], columns=deal_list[0])
+        sold_df = df.copy()
+        sold_df = sold_df[sold_properties]
+        sold_df.drop(sold_df.index[sold_df['closed_by_proposal_tool']!='Yes'],inplace=True)
+        sold_df.drop(sold_df.index[sold_df['dealtype']!='newbusiness'],inplace=True)
+        sold_df.drop(sold_df.index[sold_df['closedate']==''],inplace=True)
+        sold_df = sold_df[(sold_df.project_sunrise_id != '') & (sold_df.project_sunrise_id.isnull()==False)]
+        sold_df['closedate'] = pd.to_datetime(sold_df['closedate'],errors='coerce')
+        sold_df['appointment_date'] = pd.to_datetime(sold_df['appointment_date'],errors='coerce')
+        sold_df['closed_lost_date'] = pd.to_datetime(sold_df['closed_lost_date'],errors='coerce')
+        sold_df.drop(['dealtype'],axis=1,inplace=True)
+        sold_df = sold_df[(sold_df.dealstage == 'Closed Won') | (sold_df.dealstage == 'Closed Lost')]
+
+        #Testing due to dropoff
+        # sold_df.drop(sold_df.index[sold_df['closedate']>=today],inplace=True)
+        sold_df.drop(sold_df.index[sold_df['closedate']<df_year_cutoff],inplace=True)
+        sold_df.sort_values(by='closedate',ascending=False,inplace=True)
+
+
+        sold_df['amount_in_home_currency'] = sold_df['amount_in_home_currency'].apply(null_handler)
+        sold_df['system_size'] = sold_df['system_size'].apply(null_handler)
+
+
+        sold_df['amount_in_home_currency'] = sold_df['amount_in_home_currency'].astype('float64')
+        sold_df['system_size'] = sold_df['system_size'].astype('float64')
+
+        sold_df['project_sunrise_id'] = sold_df['project_sunrise_id'].apply(lambda x: str(x).replace(',','').replace('.0',''))
+        sold_df['project_sunrise_id'] = sold_df['project_sunrise_id'].astype('int64')
+        sold_df['project_sunrise_id'] = sold_df['project_sunrise_id'].apply(lambda x: str(x))
+        sold_df['powerwall_split_portion'].replace({'',None},inplace=True)
+        float_converter(sold_float_properties,sold_df)
+        sold_df.replace({'nan': None,np.nan:None},inplace=True)
+
+        sold_df['original_deal_owner'] = np.where(sold_df.original_deal_owner.isnull(),sold_df.hubspot_owner_id,sold_df.original_deal_owner)
+        sold_df['ec_region'] = sold_df['original_deal_owner'].map(sales_map)
+        
+        # sold_df.rename(columns={'hubspot_owner_id': 'hubspot_owner'},inplace=True)
+
+        # creating engine and resetting table to upload data
+        engine = create_engine(os.environ['sql_alchemy_conn_string'], echo=False)
+        meta = MetaData()
+        with engine.connect() as conn:
+            conn.execute("DROP TABLE IF EXISTS deals_cleaned;")
+
+        deals_cleaned = Table(
+            'deals_cleaned', meta,
+            Column('hs_object_id',BigInteger),
+            Column('dealname',String),
+            Column('amount_in_home_currency', Float),
+            Column('dealstage',String),
+            Column('closedate',DateTime),
+            Column('appointment_date',DateTime),
+            Column('appointment_type',String),
+            Column('market_region',String),
+            Column('hubspot_owner_id',String),
+            Column('module_type',String),
+            Column('original_deal_owner',String),
+            Column('commission',Float),
+            Column('run_status',String),
+            Column('project_sunrise_id',BigInteger),
+            Column('system_size',Float),
+            Column('cash_loan',String),
+            Column('deal_lead_source',String),
+            Column('tesla_powerwall_quantity',Float),
+            Column('tesla_powerwall_revenue',Float),
+            Column('module_quantity',Float),
+            Column('financing_fees',Float),
+            Column('full_promotion_true_paid_fsp',Float),
+            Column('full_promotion_mumd_fsp',Float),
+            Column('promotion_total',Float),
+            Column('sunpower_rebate_total',Float),
+            Column('promotion_discount',Float),
+            Column('cac_lead_source',String),
+            Column('cac_category_lead_source',String),
+            Column('net_revenue',Float),
+            Column('powerwall_split_portion',String),
+            Column('closed_lost_date',DateTime),
+            Column('closed_by_proposal_tool',String),
+            Column('ec_region',String),
+            Column('adders_price',Float),
+            Column('powerwall_only',String),
+            Column('send_deposit_to_accounting',String),
+            Column('utility',String),
+            Column('payment_option',String),
+            Column('hold_type',String),
+            Column('adders_cost',Float),
+
+        )
+
+        meta.create_all(engine)
+        item_uploader('deals_cleaned',sold_df)
+
+        print ('Uploaded Cleaned Deals Table')
+
+
+        # moving to strings for google upload
+        sold_df.drop(sold_df.index[sold_df['closedate']<cd_year_cutoff],inplace=True)
+        sold_df.fillna('',inplace=True)
+        sold_df['closedate'] = sold_df['closedate'].apply(date_to_string)
+        sold_df['closed_lost_date'] = sold_df['closed_lost_date'].apply(date_to_string)
+        sold_df['appointment_date'] = sold_df['appointment_date'].apply(date_to_string)
+
+
+        sold_df.drop(['closed_lost_date','closed_by_proposal_tool','ec_region','adders_price','powerwall_only',
+            'send_deposit_to_accounting','utility','payment_option','hold_type','adders_cost'],axis=1,inplace=True)
+
+
+        sheet_id = os.environ['appointments_sheet_id']
+        ws = client.open_by_key(sheet_id).worksheet('Closed Deals Export')
+        client.open_by_key(sheet_id).values_clear("Closed Deals Export!A:AD")
+        ws.update([sold_df.columns.values.tolist()] + sold_df.values.tolist(), value_input_option="USER_ENTERED")
+
+        sold_list = sold_df.values.tolist()
+        sold_list.insert(0,sold_df.columns.tolist())
+        
+        print('Sold deals have been uploaded.')
+        del sold_df
+
+    @attempt_grabs   
+    def cancel_grab():
+        # creating the separate dataframes for loading data. At a later point, need to modify for creating Tableau/SQL databases
+        cancel_df = df.copy()
+        cancel_df = cancel_df[cancel_properties]
+        cancel_df.drop(cancel_df.index[cancel_df['closedate']==''],inplace=True)
+        cancel_df.drop(cancel_df.index[cancel_df['closed_by_proposal_tool']!='Yes'],inplace=True)
+        cancel_df.drop(cancel_df.index[cancel_df['dealtype']!='newbusiness'],inplace=True)
+        cancel_df['closedate'] = pd.to_datetime(cancel_df['closedate'],errors='coerce')
+        cancel_df['closed_lost_date'] = pd.to_datetime(cancel_df['closed_lost_date'],errors='coerce')
+        cancel_df.drop(['dealtype'],axis=1,inplace=True)
+
+
+        cancel_df.drop(cancel_df.index[cancel_df['closedate']<df_year_cutoff],inplace=True)
+        cancel_df['amount_in_home_currency'] = cancel_df['amount_in_home_currency'].apply(null_handler)
+        cancel_df['system_size'] = cancel_df['system_size'].apply(null_handler)
+
+        cancel_df['amount_in_home_currency'] = cancel_df['amount_in_home_currency'].astype('float64')
+        cancel_df['system_size'] = cancel_df['system_size'].astype('float64')
+        cancel_df.drop(cancel_df.index[cancel_df['dealstage']!="Closed Lost"],inplace=True)
+        cancel_df['ec_region'] = cancel_df['original_deal_owner'].map(sales_map)
+        cancel_df.sort_values(by='closed_lost_date',ascending=False,inplace=True)
+
+        cancel_df.replace({'nan': None,np.nan:None},inplace=True)
+        cancel_df['project_sunrise_id'] = cancel_df['project_sunrise_id'].apply(id_handler)
+        float_converter(cancel_float_properties,cancel_df)
+        cancel_df.replace({'nan': None,np.nan:None},inplace=True)
+        cancel_df['powerwall_split_portion'].replace({'',None},inplace=True)
+        cancel_df.columns.tolist()
+
+        engine = create_engine(os.environ['sql_alchemy_conn_string'], echo=False)
+        meta = MetaData()
+        with engine.connect() as conn:
+            conn.execute("DROP TABLE IF EXISTS cancels_cleaned;")
+
+        cancels_cleaned = Table(
+            'cancels_cleaned', meta,
+            Column('hs_object_id',BigInteger),
+            Column('dealname',String),
+            Column('project_sunrise_id',BigInteger),
+            Column('amount_in_home_currency', Float),
+            Column('closedate',DateTime),
+            Column('dealstage',String),
+            Column('hubspot_owner_id',String),
+            Column('top_deal_sources',String),
+            Column('closed_lost_date',DateTime),
+            Column('closed_lost_reason',String),
+            Column('closed_lost_notes',String),
+            Column('market_region',String),
+            Column('system_size',Float),
+            Column('deal_lead_source',String),
+            Column('tesla_powerwall_quantity',Float),
+            Column('tesla_powerwall_revenue',Float),
+            Column('closed_by_proposal_tool',String),
+            Column('cac_lead_source',String),
+            Column('cac_category_lead_source',String),
+            Column('financing_fees',Float),
+            Column('net_revenue',Float),
+            Column('original_deal_owner',String),
+            Column('agent_name',String),
+            Column('canvasser_name',String),
+            Column('ec_region',String),
+            Column('powerwall_split_portion',String),
+            Column('powerwall_only',String),
+        )
+
+        meta.create_all(engine)
+        item_uploader('cancels_cleaned',cancel_df)
+        print('Uploaded Cleaned Cancels Table')
+
+
+        cancel_df.drop(cancel_df.index[cancel_df['closedate']<cd_year_cutoff],inplace=True)
+        cancel_df['closedate'] = cancel_df['closedate'].apply(date_to_string)
+        cancel_df['closed_lost_date'] = cancel_df['closed_lost_date'].apply(date_to_string)
+
+        cancel_df.fillna('',inplace=True)
+
+        sheet_id = os.environ['appointments_sheet_id']
+        ws = client.open_by_key(sheet_id).worksheet('Cancellations Upload')
+        client.open_by_key(sheet_id).values_clear("Cancellations Upload!A:Y")
+        ws.update([cancel_df.columns.values.tolist()] + cancel_df.values.tolist(), value_input_option="USER_ENTERED")
+
+        print('Cancellations have been uploaded.')
+        del cancel_df
+
+
+    # Need to modify this script to update SQL database with the Funnel DF
+    def funnel_grab():
+        pass
+        # cross_funnel_properties = ['associated_contact','hs_object_id','dealname','dealname','dealname','amount_in_home_currency','dealstage',
+        #                 'appointment_date','appointment_disposition','cc_notes_important','call_center_return_notes',
+        #                     'run_status','call_center_reschedule_disposition','closed_lost_reason','closed_lost_notes',
+        #                     'hubspot_owner_id','closed_by_proposal_tool','createdate','agent_name','dealtype']
+        # funnel_df = df.copy()
+        # funnel_df = funnel_df[sold_properties]
+        # funnel_df.drop(funnel_df.index[funnel_df['dealtype']!='newbusiness'],inplace=True)
+        # funnel_df.drop(['dealtype'],axis=1,inplace=True)
+        # funnel_df.drop(funnel_df.index[funnel_df['associated_contact']==''],inplace=True)
+        # funnel_df['associated_contact'] = funnel_df['associated_contact'].astype('float64')
+        # funnel_df.drop(funnel_df.index[funnel_df['appointment_date']==''],inplace=True)
+        # funnel_df['appointment_date'] = pd.to_datetime(funnel_df['appointment_date'],errors='coerce')
+        # funnel_df['closedate'] = pd.to_datetime(funnel_df['closedate'],errors='coerce')
+        # funnel_df.fillna('',inplace=True)
+
+        # contacts_raw = query_selector()
+
+    #Run individual grab functions
+    appointments_grab()
+    sold_grab()
+    cancel_grab()
+
+    try:
+        funnel_grab()
+    except Exception as e:
+        print('Funnel DF Failed')
+        print(e)
+
+
+
+    print('')
+    print('All uploads completed.')
+
+    # returning sold_list
+    def get_sold_list():
+        sold_df = df.copy()
         sold_df = sold_df[sold_properties]
         sold_df.drop(sold_df.index[sold_df['closed_by_proposal_tool']!='Yes'],inplace=True)
         sold_df.drop(sold_df.index[sold_df['dealtype']!='newbusiness'],inplace=True)
@@ -380,13 +716,6 @@ def run_grab(all_deals):
 
         sold_df['amount_in_home_currency'] = sold_df['amount_in_home_currency'].apply(null_handler)
         sold_df['system_size'] = sold_df['system_size'].apply(null_handler)
-        sold_df['swf_lead_id'] = sold_df['swf_lead_id'].apply(null_handler)
-
-        # sold_df['closed_lost_date'] = sold_df['closed_lost_date'].apply(null_handler)
-        # sold_df['appointment_date'] = sold_df['appointment_date'].apply(null_handler)
-
-        # sold_df['closed_lost_date'] = sold_df['closed_lost_date'].apply(datetime_converter)
-        # sold_df['appointment_date'] = sold_df['appointment_date'].apply(datetime_converter)
 
         sold_df['closedate'] = sold_df['closedate'].apply(date_to_string)
         sold_df['closed_lost_date'] = sold_df['closed_lost_date'].apply(date_to_string)
@@ -394,215 +723,25 @@ def run_grab(all_deals):
 
         sold_df['amount_in_home_currency'] = sold_df['amount_in_home_currency'].astype('float64')
         sold_df['system_size'] = sold_df['system_size'].astype('float64')
-        sold_df['swf_lead_id'] = sold_df['swf_lead_id'].astype('float64')
 
 
-        # sold_df['hubspot_owner_id'] = sold_df['hubspot_owner_id'].map(owner_dict)
-        # sold_df['original_deal_owner'] = sold_df['original_deal_owner'].map(owner_dict)
 
 
-        sold_df.drop(['closed_lost_date','closed_by_proposal_tool'],axis=1,inplace=True)
-
-
-        sheet_id = os.environ['appointments_sheet_id']
-        ws = client.open_by_key(sheet_id).worksheet('Closed Deals Export')
-        client.open_by_key(sheet_id).values_clear("Closed Deals Export!A:AD")
-        ws.update([sold_df.columns.values.tolist()] + sold_df.values.tolist(), value_input_option="USER_ENTERED")
-
-        print('Sold deals have been uploaded.')
-
-    @attempt_grabs   
-    def cancel_grab():
-        # creating the separate dataframes for loading data. At a later point, need to modify for creating Tableau/SQL databases
-        cancel_df = pd.DataFrame(data = deal_list[1::], columns=deal_list[0])
-        cancel_df = cancel_df[cancel_properties]
-        cancel_df.drop(cancel_df.index[cancel_df['closedate']==''],inplace=True)
-        cancel_df.drop(cancel_df.index[cancel_df['closed_by_proposal_tool']!='Yes'],inplace=True)
-        cancel_df.drop(cancel_df.index[cancel_df['dealtype']!='newbusiness'],inplace=True)
-        cancel_df['closedate'] = pd.to_datetime(cancel_df['closedate'],errors='coerce')
-        cancel_df['closed_lost_date'] = pd.to_datetime(cancel_df['closed_lost_date'],errors='coerce')
-        cancel_df.drop(['dealtype'],axis=1,inplace=True)
-
-
-        cancel_df.drop(cancel_df.index[cancel_df['closedate']<cd_year_cutoff],inplace=True)
-        cancel_df['amount_in_home_currency'] = cancel_df['amount_in_home_currency'].apply(null_handler)
-        cancel_df['system_size'] = cancel_df['system_size'].apply(null_handler)
-        cancel_df['swf_lead_id'] = cancel_df['swf_lead_id'].apply(null_handler)
-
-        cancel_df['amount_in_home_currency'] = cancel_df['amount_in_home_currency'].astype('float64')
-        cancel_df['system_size'] = cancel_df['system_size'].astype('float64')
-        cancel_df['swf_lead_id'] = cancel_df['swf_lead_id'].astype('float64')
-
-
-        cancel_df.drop(cancel_df.index[cancel_df['dealstage']!="Closed Lost"],inplace=True)
-
-
-        # cancel_df['hubspot_owner_id'] = cancel_df['hubspot_owner_id'].map(owner_dict)
-        # cancel_df['original_deal_owner'] = cancel_df['original_deal_owner'].map(owner_dict)
-        cancel_df['ec_region'] = cancel_df['original_deal_owner'].map(sales_map)
-        cancel_df.sort_values(by='closed_lost_date',ascending=False,inplace=True)
-
-        cancel_df['closedate'] = cancel_df['closedate'].apply(date_to_string)
-        cancel_df['closed_lost_date'] = cancel_df['closed_lost_date'].apply(date_to_string)
-
-        cancel_df.fillna('',inplace=True)
-
-        sheet_id = os.environ['appointments_sheet_id']
-        ws = client.open_by_key(sheet_id).worksheet('Cancellations Upload')
-        client.open_by_key(sheet_id).values_clear("Cancellations Upload!A:Y")
-        ws.update([cancel_df.columns.values.tolist()] + cancel_df.values.tolist(), value_input_option="USER_ENTERED")
-
-        print('Cancellations have been uploaded.')
-
-
-    # Need to modify this script to update SQL database with the Funnel DF
-
-    def funnel_grab():
-        pass
-        # funnel_df = pd.DataFrame(data = deal_list[1::], columns=all_properties)
-        # funnel_df = funnel_df[cross_funnel_properties]
-        # funnel_df.drop(funnel_df.index[funnel_df['dealtype']!='newbusiness'],inplace=True)
-        # funnel_df.drop(['dealtype'],axis=1,inplace=True)
-        # funnel_df.drop(funnel_df.index[funnel_df['associated_contact']==''],inplace=True)
-        # funnel_df['associated_contact'] = funnel_df['associated_contact'].astype('float64')
-
-        # funnel_df.drop(funnel_df.index[funnel_df['appointment_date']==''],inplace=True)
-        # funnel_df['appointment_date'] = funnel_df['appointment_date'].apply(datetime_converter)
-        # funnel_df['createdate'] = funnel_df['createdate'].apply(datetime_converter)
-
-        # funnel_df.drop(funnel_df.index[funnel_df['appointment_date']<cd_year_cutoff],inplace=True)
-
-
-        # funnel_df['amount_in_home_currency'] = funnel_df['amount_in_home_currency'].apply(null_handler)
-
-        # funnel_df['amount_in_home_currency'] = funnel_df['amount_in_home_currency'].astype('float64')
-
-        # funnel_df['dealstage'] = funnel_df['dealstage'].map(deal_stage_map)
-
-        # funnel_df['hubspot_owner_id'] = funnel_df['hubspot_owner_id'].map(owner_dict)
-
-        # funnel_df['appointment_date'] = funnel_df['appointment_date'].apply(date_to_string)
-        # funnel_df['createdate'] = funnel_df['createdate'].apply(date_to_string)
-        # funnel_df.fillna('',inplace=True)
-
-
-        # # importing and cleaning contacts database for merge
-
-
-        # contacts_df = pd.read_csv(data_path_base + 'contacts_export.csv')
-        # contacts_df.fillna('',inplace=True)
-
-        # contacts_df.rename(columns = {'hs_object_id': 'Contact ID'},inplace=True)
-        # funnel_df.rename(columns = {'associated_contact': 'Contact ID'},inplace=True)
-
-        # # Commenting out line below to add in Hubspot mappings
-        # # contacts_df['lead_source_corrected'] = contacts_df['lead_source'].apply(contacts_lead_map)
-
-        # contacts_df.drop(columns = ['lead_type','zombie'],axis=1,inplace=True)
-        # contacts_df['Contact ID'] = contacts_df['Contact ID']
-
-        # merged = contacts_df.merge(funnel_df, on = 'Contact ID', how = 'left')
-        # merged.fillna('',inplace=True)
-        # merged.drop(columns = ['dealname','hs_object_id'],axis=1,inplace=True)
-        # merged.rename(columns = {'hubspot_owner_id_x': 'Contact Owner',
-        #                         'hubspot_owner_id_y': 'Deal Owner',
-        #                         'createdate_y': 'Appointment Create Date'},
-        #             inplace=True)
-
-        # merged_headers = merged.columns.values.tolist()
-
-        # merged.to_excel(data_path_base + 'funnel_data.xlsx',index=False)
-        # merged_cleaned = merged.values.tolist()
-        # merged_cleaned.insert(0,merged_headers)
-
-        # # splitting merge due to size. Going to work in two parts for the moment
-
-        # length = len(merged_cleaned)
-        # half_point = math.floor(length/2)
-
-        # cleaned1 = merged_cleaned[0:half_point]
-        # cleaned2 = merged_cleaned[half_point:length]
-
-
-        # merged_id = '1tCouR5cOgezklym3f0tJCDn0ymgedJy2-Dgnkv4pXJY'
-        # merged_range1 = 'Contacts Import!A1:AJ'+str(len(cleaned1))
-        # merged_clear_range1 = 'Contacts Import!A1:AJ'
-
-        # google_update(merged_id,merged_range1,cleaned1,merged_clear_range1)
-
-        # merged_range2 = 'Contacts Import!A'+str(half_point)+':AJ'+str(len(merged_cleaned))
-        # merged_clear_range2 = 'Contacts Import!A'+str(half_point)+':AJ'
-
-        # print()
-        # print('First half of marketing funnel items uploaded.')
-
-
-        # google_update(merged_id,merged_range2,cleaned2,merged_clear_range2)
-
-        # print('Second half of marketing funnel items have been uploaded.')
-
-        # # area to update marketing funnel's date so marketing can see latest update time
-
-
-        # now = datetime.datetime.now().strftime("%m/%d/%Y %H:%M:%S")
-        # body_update = {'values': [[now]]}
-
-    
-        # if os.path.exists(sheets_token):
-        #     with open(sheets_token, 'rb') as token:
-        #         creds = pickle.load(token)
-        # service = build('sheets', 'v4', credentials=creds)
-
-        # sheet = service.spreadsheets()
+        sold_list = sold_df.values.tolist()
+        sold_list.insert(0,sold_df.columns.tolist())
+        del sold_df
         
-        # requested_ID = ''
-        # sheets_range = 'Marketing Funnel - Overview!J1'
+        print('Sold deals have been uploaded.')
+        return sold_list
 
-        # sheet.values().update(spreadsheetId=requested_ID, range = sheets_range,
-        #                                 body=body_update,valueInputOption='USER_ENTERED').execute()
-
-        # print('Timestamp Updated.')
-
-
-    #Run individual grab functions
-    appointments_grab()
-    sold_grab()
-    cancel_grab()
-
+    # temporary fix for getting the sold deals df
     try:
-        funnel_grab()
+        sold_values = get_sold_list()
+        return sold_values
     except:
-        print('Funnel DF Failed')
-
-
-
-    print('')
-    print('All uploads completed.')
-
-    return deal_list
+        print("Sold List Unable to Be Returned")
 
     
 if __name__ == "__main__":
-    api_key = os.environ['hapikey']
-    hubspot = HubspotApi(api_key)
-
-    all_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage','agent_name',
-                            'appointment_date','top_deal_sources','appointment_type','deal_lead_source',
-                            'deal_marketing_lead_category','hubspot_owner_id','dealtype',
-                            'market_region','run_status','appointment_ran_by','appointment_disposition','swf_lead_id',
-                            'closed_lost_notes','call_center_return_notes','closed_lost_reason','createdate',
-                            'has_been_rescheduled','closed_by_proposal_tool','module_type',
-                            'original_deal_owner','commission','system_size','tesla_powerwall_quantity','tesla_powerwall_revenue',
-                            'module_quantity','closed_lost_date','closedate','cc_notes_important',
-                            'call_center_reschedule_disposition','closed_won_reason','appointment_date_passed',
-                            'promotion_rebate','promotion_discount','sunpower_rebate_adder','financing_fees','mumd_promotion',
-                            'true_promotion','promotion_adder','cac_lead_source','cac_category_lead_source','full_promotion_true_paid_fsp',
-                            'full_promotion_total','full_promotion_mumd_fsp','sunpower_rebate_total','promotion_true_paid_by_fsp',
-                            'promotion_mumd_fsp','promotion_total','utility','canvasser_name','net_revenue','powerwall_split_portion','cash_loan',
-                            'send_deposit_to_accounting','matt_deposit_check','project_sunrise_id','deposit_sent_integration_failure',
-                            'hold_type','powerwall_only','payment_option']            
-
-    results = hubspot.get_all_deals(all_properties)
-    deal_list_raw = hubspot.parse_deals()
-    deal_list = map_deals_list(deal_list_raw)
-    run_grab(deal_list)
+    # pass
+    run_grab()

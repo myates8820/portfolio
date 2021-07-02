@@ -7,34 +7,22 @@ import numpy as np
 import pandas as pd
 import datetime
 from time import sleep
-import time
-import sys, os
-from sqlalchemy import create_engine, insert, update, delete, Table, Column, Integer, String, MetaData, Date, DateTime, Float, Boolean, select, BigInteger
+import os
+# from sqlalchemy import create_engine, insert, update, delete, Table, Column, Integer, String, MetaData, Date, DateTime, Float, Boolean, select, BigInteger
 import requests
 import json
-from subfunctions.Hubspot_API import HubspotApi
-from subfunctions.deal_parser import map_deals_list
+
 import psycopg2
 
+def update_task_database():
 
-def update_task_database(data,full_reset):
-    import json
-    import requests
-    import pandas as pd
-    import numpy as np
-    import psycopg2
-    from time import sleep
-    from oauth2client.service_account import ServiceAccountCredentials
-    import os
-    import pickle
-    import datetime
-    from sqlalchemy import create_engine, insert, update, delete, Table, Column, Integer, String, MetaData, Date, DateTime, Float, Boolean, select, BigInteger
-    import psycopg2
+    full_reset = False
 
     # authorizing gspread
     token = os.environ['sheets_token']
     scopes = ['https://spreadsheets.google.com/feeds']
 
+    print('Sold Projects Grab Started')
 
     creds_dict = json.loads(token)
     creds_dict["private_key"] = creds_dict["private_key"].replace("\\\\n", "\n")
@@ -42,23 +30,24 @@ def update_task_database(data,full_reset):
     client = gspread.authorize(creds)
 
     # setting up task names for database
+
     old_task_names = ['upload_design_packet_pe_stamp_set', 'upload_structural_letter', 'post_install_call', 'complete_utility_inspection', 'schedule_utility_inspection', 'utility_bill', 
-                  'quality_assurance_complete', 'signed_contract', 'upload_eddie_layout', 'final_proposal', 'upload_aurora_layout', 'confirm_deposit_sent_to_accounting', 'upload_proposed_svl',
-                  'purchasing_complete', 'complete_monitoring', 'register_warranty', 'receive_final_payment', 'commission_system', 'welcome_call_complete', 'upload_report_photos_to_server', 
-                  'crew_installation_complete', 'upload_pto_letter', 'upload_commissioning_report', 'confirm_deposit_received', 'schedule_shutdown', 'schedule_installation', 'upload_approved_bom', 
-                  'submit_utility_rebate_application', 'complete_city_inspection', 'quality_review_complete', 'allocate_site_assessment', 'submit_architectural_improvement_request', 
-                  'upload_design_packet_construction_set', 'contract_review_complete', 'upload_permit_application_approval', 'receive_sop_payment', 'submit_m2_documents', 'close_project', 
-                  'upload_interconnection_application_approval', 'determine_permitting_requirements', 'happiness_call_complete', 'request_design', 'submit_interconnection_application', 
-                  'schedule_city_inspection', 'upload_pif_invoice', 'submit_permit_application', 'send_to_intake', 'upload_utility_rebate_application_approval', 'submit_m1_documents', 
-                  'upload_design_packet_as_built_set', 'submit_installation_notice', 'receive_rebate_payment', 'complete_closeout_packet', 'dispatch_site_assessment', 'complete_site_assessment', 
-                  'upload_architectural_improvement_request_approval']
+                'quality_assurance_complete', 'signed_contract', 'upload_eddie_layout', 'final_proposal', 'upload_aurora_layout', 'confirm_deposit_sent_to_accounting', 'upload_proposed_svl',
+                'purchasing_complete', 'complete_monitoring', 'register_warranty', 'receive_final_payment', 'commission_system', 'welcome_call_complete', 'upload_report_photos_to_server', 
+                'crew_installation_complete', 'upload_pto_letter', 'upload_commissioning_report', 'confirm_deposit_received', 'schedule_shutdown', 'schedule_installation', 'upload_approved_bom', 
+                'submit_utility_rebate_application', 'complete_city_inspection', 'quality_review_complete', 'allocate_site_assessment', 'submit_architectural_improvement_request', 
+                'upload_design_packet_construction_set', 'contract_review_complete', 'upload_permit_application_approval', 'receive_sop_payment', 'submit_m2_documents', 'close_project', 
+                'upload_interconnection_application_approval', 'determine_permitting_requirements', 'happiness_call_complete', 'request_design', 'submit_interconnection_application', 
+                'schedule_city_inspection', 'upload_pif_invoice', 'submit_permit_application', 'send_to_intake', 'upload_utility_rebate_application_approval', 'submit_m1_documents', 
+                'upload_design_packet_as_built_set', 'submit_installation_notice', 'receive_rebate_payment', 'complete_closeout_packet', 'dispatch_site_assessment', 'complete_site_assessment', 
+                'upload_architectural_improvement_request_approval']
 
     # 'complete_closeout_packet' in case to switch with close project
 
-    task_names = ['send_to_intake','signed_contract','confirm_deposit_received','complete_site_assessment','upload_design_packet_construction_set','submit_architectural_improvement_request',
-                'submit_permit_application','submit_interconnection_application','submit_utility_rebate_application','upload_architectural_improvement_request_approval',
-                'upload_permit_application_approval','upload_interconnection_application_approval','upload_utility_rebate_application_approval','schedule_installation','crew_installation_complete',
-                'complete_city_inspection','complete_utility_inspection','close_project','allocate_site_assessment']
+    task_names = ['send_to_intake','signed_contract','confirm_deposit_sent_to_accounting','confirm_deposit_received','complete_site_assessment','upload_design_packet_construction_set','submit_architectural_improvement_request',
+            'submit_permit_application','submit_interconnection_application','submit_utility_rebate_application','upload_architectural_improvement_request_approval',
+            'upload_permit_application_approval','upload_interconnection_application_approval','upload_utility_rebate_application_approval','schedule_installation','crew_installation_complete',
+            'complete_city_inspection','complete_utility_inspection','close_project','allocate_site_assessment']
 
 
     hs_api_key = os.environ['hapikey']
@@ -67,69 +56,156 @@ def update_task_database(data,full_reset):
     db_password = os.environ['password']
     db_host = os.environ['host']
 
-    def query_selector(query,cols,table):
-        conn = psycopg2.connect(database=db_database, user=db_user, 
-                            password = db_password,
-                            host = db_host)
+    def get_table_columns(table):
+        conn = psycopg2.connect(database=os.environ['database'], user=os.environ['user'], 
+                            password = os.environ['password'],
+                            host = os.environ['host'])
         cur = conn.cursor()
         cur.execute("rollback;")
-        
-        query_build = ', '.join(cols)
-        query = query.replace('[cols]', query_build).replace('[table]', table)
-        cur.execute(query)
+        col_query = "Select * FROM [table] LIMIT 0"
+        cur.execute(col_query.replace('[table]',table))
+        colnames = [desc[0] for desc in cur.description]
+        return list(colnames)
+
+
+    def query_selector(query,cols,table):
+        conn = psycopg2.connect(database=os.environ['database'], user=os.environ['user'], 
+                            password = os.environ['password'],
+                            host = os.environ['host'])
+        cur = conn.cursor()
+        cur.execute("rollback;")
+
+        if cols == '*':
+            final_query = "SELECT * FROM [table]"
+            final_query = final_query.replace('[table]', table)
+            col_query = "Select * FROM [table] LIMIT 0"
+            cur.execute(col_query.replace('[table]',table))
+            colnames = [desc[0] for desc in cur.description]
+        else:
+            query_build = ', '.join(cols)
+            final_query = query.replace('[cols]', query_build).replace('[table]', table)
+            colnames = cols
+        cur.execute(final_query)
         data = cur.fetchall()
-        data.insert(0,tuple(cols))
+        data.insert(0,tuple(colnames))
         cur.close()
         conn.close()
         return data
 
+    deal_stage_map = {
+        'appointmentscheduled': 'Appointment Scheduled',
+        '1676636': 'Working - 1',
+        '1913549': 'Working - 2',
+        '1913557': 'Working - 3',
+        '1913578': 'Working - 4',
+        '1913579': 'Working - 5',
+        'closedwon':'Closed Won',
+        'closedlost':'Closed Lost',
+        '5839747': 'Appointment Scheduled',
+        '5839748': 'Working - 1',
+        '5839749': 'Working - 2',
+        '5839750': 'Working - 3',
+        '5839751': 'Working - 4',
+        '5839788': 'Working - 5',
+        '5839752':'Closed Won',
+        '5839753':'Closed Lost',
+    }
+
     start_date = datetime.datetime(2019,1,1)
-    all_deals_df = pd.DataFrame(data=data[1::],columns = data[0])
-    all_deals_df = all_deals_df[all_deals_df.project_sunrise_id.isnull()==False]
-    all_deals_df['project_sunrise_id'] = all_deals_df['project_sunrise_id'].apply(lambda x: str(x).replace(',',''))    
-    sold_df = all_deals_df[(all_deals_df.closed_by_proposal_tool == 'Yes') & ((all_deals_df.dealstage == 'Closed Won') | (all_deals_df.dealstage == 'Closed Lost'))].copy()
+    deal_columns = ['hs_object_id','project_sunrise_id','dealname','hubspot_owner_id','send_deposit_to_accounting','dealstage','amount_in_home_currency','system_size','closedate',
+                'closed_by_proposal_tool','payment_option','module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','utility',
+                'market_region','hold_type','appointment_date','financing_fees','net_revenue','closed_lost_date']
+    deal_query =""" SELECT [cols] FROM [table] WHERE closedate >= '2019-1-1' AND closed_by_proposal_tool = 'Yes' AND project_sunrise_id IS NOT NULL"""
+    deals_raw = [list(x) for x in query_selector(deal_query,deal_columns, 'deals_cleaned')]
+    sold_df = pd.DataFrame(data=deals_raw[1::],columns = deals_raw[0])
+    sold_df = sold_df[sold_df.project_sunrise_id.isnull()==False]
+    sold_df['project_sunrise_id'] = sold_df['project_sunrise_id'].apply(lambda x: str(x).replace(',',''))   
+    sold_df = sold_df[(sold_df.closed_by_proposal_tool == 'Yes') & ((sold_df.dealstage == 'Closed Won') | (sold_df.dealstage == 'Closed Lost'))]
     sold_df['closedate'] = pd.to_datetime(sold_df['closedate'],errors='coerce')
     sold_df = sold_df[sold_df.closedate >= start_date]
-    sold_df = sold_df[['hs_object_id','project_sunrise_id','dealname','closedate','appointment_date','amount_in_home_currency','system_size','payment_option',
-                    'module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','utility','market_region','hold_type','dealstage','closed_lost_date']]
+    sold_df = sold_df[['hs_object_id','project_sunrise_id','dealname','appointment_date','amount_in_home_currency','system_size','payment_option',
+                    'module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','utility','market_region','dealstage','closed_lost_date',
+                    'financing_fees','net_revenue']]
     sold_df.drop_duplicates(subset='project_sunrise_id',inplace=True)
-    sold_df_list = sold_df.values.tolist()
-    data_columns = sold_df.columns.tolist()
-    df_columns = sold_df.columns.tolist()
 
-    conn_string = os.environ['sql_alchemy_conn_string']
-    engine = create_engine(conn_string, echo=False)
-    meta = MetaData()
-    tasks_wide = Table('tasks_wide', meta, autoload_with=engine)
+
+    def null_handler(x):
+        if x == '':
+            return 0
+        elif x is None:
+            return 0
+        else:
+            return x
+
+    def float_converter(column_array,df):
+        for x in column_array:
+            df[x].fillna(0.0,inplace=True)
+            df[x] = df[x].apply(null_handler)
+            df[x] = df[x].apply(lambda x: str(x).replace(',',''))
+            df[x] = df[x].astype('float64')
+
+    def rounder(x):
+        try:
+            return round(x,2)
+        except:
+            return x
+
+    sold_df['system_size'] = sold_df['system_size'].apply(rounder)
+    float_converter(['financing_fees','net_revenue'],sold_df)
+
+    # section for grabbing project data directly from sunrise
+
+    print('AWS Grabs Started')
+
+    sunrise_query = """SELECT [cols] FROM [table]"""
+    sunrise_list = query_selector(sunrise_query,'*','sunrise_projects')
+    sunrise_df = pd.DataFrame(data=sunrise_list[1::],columns=sunrise_list[0]).fillna('')
+    sunrise_df['closedate'] = pd.to_datetime(sunrise_df['closedate'],unit='ms',errors='coerce')
+    sunrise_df = sunrise_df[sunrise_df.project_sunrise_id.isnull()==False]
+    sunrise_df['project_sunrise_id'] = sunrise_df['project_sunrise_id'].apply(lambda x: str(x).replace(',','').replace('.0',''))
+    sunrise_df['project_sunrise_id'] = sunrise_df['project_sunrise_id'].astype('int64')
+    sunrise_df['project_sunrise_id'] = sunrise_df['project_sunrise_id'].apply(lambda x: str(x))
+
+
+    # merging dfs and setting columns to lists
+    sold_df = pd.merge(sold_df,sunrise_df,on='project_sunrise_id',how='left')
+    del sunrise_df
+
+    sold_df_list = sold_df.values.tolist()
+    sold_df_columns = sold_df.columns.tolist()
+
+    # meta = MetaData()
+    # engine = create_engine(os.environ['sql_alchemy_conn_string'], echo=False)
+    # tasks_wide = Table('tasks_wide', meta, autoload_with=engine)
 
     # getting columns from table and stripping task_df to these columns in later element. Must make sure to 
-    conn = engine.connect()
-    s = select([tasks_wide])
-    result = conn.execute(s)
-    table_keys = result.keys()
-
-    projects_query = """ SELECT [cols] FROM [table] WHERE close_project_completed IS NOT NULL"""
-    projects_list = [list(x) for x in query_selector(projects_query,table_keys, 'tasks_wide')]
-    projects_df = pd.DataFrame(data=projects_list[1::],columns=projects_list[0])
-    close_project_index = projects_df.columns.tolist().index('close_project_completed')
-    sunrise_id_index = projects_df.columns.tolist().index('project_sunrise_id')
-    projects_df['project_sunrise_id'] = projects_df['project_sunrise_id'].apply(lambda x: str(x))
-
-    finished_ids = projects_df['project_sunrise_id'].values.tolist()
+    table_keys = get_table_columns('tasks_wide')
 
 
-    url_base = os.environ['sunrise_alltasks_base']
+    if full_reset:
+        finished_ids = []
+        projects_df = pd.DataFrame(columns=table_keys)
+    else:
+        projects_query = """ SELECT [cols] FROM [table] WHERE close_project_completed IS NOT NULL"""
+        projects_list = [list(x) for x in query_selector(projects_query,table_keys, 'tasks_wide')]
+        projects_df = pd.DataFrame(data=projects_list[1::],columns=projects_list[0])
+        close_project_index = projects_df.columns.tolist().index('close_project_completed')
+        sunrise_id_index = projects_df.columns.tolist().index('project_sunrise_id')
+        projects_df['project_sunrise_id'] = projects_df['project_sunrise_id'].apply(lambda x: str(x))
+        finished_ids = projects_df['project_sunrise_id'].values.tolist()
+
+
+    url_base = os.environ['sunrise_task_url']
     api_key = os.environ['sunrise_api_key']
     org_key = os.environ['sunrise_org_key']
     headers = {'api-key': api_key}
 
-
     sunrise_list = []
-    raw_sold_df = sold_df_list
-    for x in raw_sold_df:
-        if x[sunrise_id_index] not in finished_ids:
+    sold_id_index = sold_df_columns.index('project_sunrise_id')
+    for x in sold_df_list:
+        if x[sold_id_index] not in finished_ids:
             sunrise_list.append(x)
-
+            
     print("Sunrise Grab Started.")
     failures = []     
     failure_responses = []
@@ -138,7 +214,7 @@ def update_task_database(data,full_reset):
         try_count = 0
         while try_count<3:
             try:
-                lead_id = x[sunrise_id_index]
+                lead_id = x[sold_id_index]
                 url = url_base.replace('{orgId}',org_key).replace('{project_id}',lead_id)
                 r = requests.get(url = url, headers = headers)
                 owner_response = json.loads(r.text)
@@ -211,10 +287,10 @@ def update_task_database(data,full_reset):
         full_task_list.append(x+'_completed')
         full_task_list.append(x+'_completed_by')
         
-    # adding in task names to data_columns
+    # adding in task names to sold_df_columns
     for x in full_task_list:
-        data_columns.append(x)
-        
+        sold_df_columns.append(x)
+
     # creating rows for df
 
     df_rows = []
@@ -230,14 +306,14 @@ def update_task_database(data,full_reset):
             print(x)
 
     # old test for finding duplicates
-    # set([x for x in data_columns if data_columns.count(x) > 1])
-    # len(data_columns)
-            
-    task_df = pd.DataFrame(data=df_rows,columns=data_columns)
+    # set([x for x in sold_df_columns if sold_df_columns.count(x) > 1])
+    # len(sold_df_columns)
+
+    task_df = pd.DataFrame(data=df_rows,columns=sold_df_columns)
     task_df.drop_duplicates(subset='project_sunrise_id',inplace=True)
     for x in full_task_list:
         task_df[x] = pd.to_datetime(task_df[x],unit='ms',errors='coerce') - pd.Timedelta('05:00:00')
-        
+
     additional_date_columns = ['closedate','appointment_date']
     for x in additional_date_columns:
         task_df[x] = pd.to_datetime(task_df[x],errors='coerce')
@@ -281,19 +357,26 @@ def update_task_database(data,full_reset):
     #         row_dictionary[sql_columns[i]] = row[i]
     #     row_values.append(row_dictionary)
 
+    # comment out again if issues arise
+
     upload_conn = psycopg2.connect(database=db_database, user=db_user, 
-                        password = db_password,
-                        host = db_host)
+                    password = db_password,
+                    host = db_host)
 
 
     upload_cursor = upload_conn.cursor()
     print("before execute")
-    upload_cursor.execute("""DELETE FROM tasks_wide
-                            WHERE project_sunrise_id IN (
-                                SELECT project_sunrise_id
-                                WHERE close_project_completed IS NULL);""")
+
+    if full_reset:
+        upload_cursor.execute("""DELETE FROM tasks_wide
+                            WHERE project_sunrise_id IS NOT NULL;""")
+    else:
+        upload_cursor.execute("""DELETE FROM tasks_wide
+                                WHERE project_sunrise_id IN (
+                                    SELECT project_sunrise_id
+                                    WHERE close_project_completed IS NULL);""")
     upload_conn.commit()
-    conn.close()
+    upload_conn.close()
     print("Deleted Successfully")
 
     import time
@@ -342,6 +425,7 @@ def update_task_database(data,full_reset):
                     line.append(m)
             return ''.join(line)
 
+
     print('Task DB Update Started')
 
     upload_conn = psycopg2.connect(database=db_database, user=db_user, 
@@ -366,7 +450,7 @@ def update_task_database(data,full_reset):
         final_page = False
         paginate = True
         while paginate:
-            
+
             pagination_length = 50
             end_number = item_number+pagination_length
             if end_number>=full_length:
@@ -375,7 +459,7 @@ def update_task_database(data,full_reset):
             else:
                 end_index = end_number
             # print(end_index)
-                
+
             value_list = []
             for x in task_values_list[item_number:end_index]:
                 string_row = []
@@ -386,18 +470,21 @@ def update_task_database(data,full_reset):
                         string_row.append(str(i).replace(';',':')) #need to fix any instances of ; so it doesn't break the delimiter
                 row = ";".join(string_row)
                 value_list.append(str(row))
-                
+
             string_io_iterator(upload_conn,'tasks_wide',columns_tuple,value_list)
-            
+
             if final_page:
                 paginate=False
             else:
                 item_number+=pagination_length
-    except:
+    except Exception as e:
         print('Task DB Upload Failed')
+        print(e)
 
+    print('Task DB Update Completed')
+    upload_conn.close()
 
-    # adding finished_df back to task df
+# adding finished_df back to task df
 
     task_df = pd.concat([projects_df,task_df],ignore_index=True)
 
@@ -409,7 +496,7 @@ def update_task_database(data,full_reset):
                     'schedule_installation_created','schedule_installation_completed','crew_installation_complete_completed','complete_city_inspection_completed',
                     'complete_utility_inspection_completed','close_project_completed','schedule_installation_raw','installation_complete_raw','appointment_to_contract','contract_to_design','contract_to_install',
                     'system_size','amount_in_home_currency','payment_option','module_type','module_quantity','tesla_powerwall_quantity','powerwall_only','hours','hold_type','utility',
-                    'market_region','dealstage','closed_lost_date']
+                    'market_region','dealstage','closed_lost_date','hold_status','active_hold','critical_path_stage','critical_path_prio']
 
     metrics_date_columns = ['appointment_date','signed_contract_completed','closedate','confirm_deposit_received_completed','complete_site_assessment_completed',
                     'upload_design_packet_construction_set_completed','submit_architectural_improvement_request_completed','submit_permit_application_completed',
@@ -436,7 +523,7 @@ def update_task_database(data,full_reset):
     #for exporting
     for x in metrics_date_columns:
         metrics_df[x] = metrics_df[x].dt.strftime('%m/%d/%Y').apply(date_converter)
-        
+
     metrics_df.fillna('',inplace=True)
     # correcting for some dtype issues in sheets upload
     for x in ['system_size','amount_in_home_currency','module_quantity']:
@@ -444,7 +531,6 @@ def update_task_database(data,full_reset):
         metrics_df[x] = metrics_df[x].fillna(0.0)
         metrics_df[x] = metrics_df[x].astype('float64')
     metrics_df.fillna('',inplace=True)
-
 
 
     sheet_id = os.environ['metrics_sheet_id']
@@ -456,27 +542,4 @@ def update_task_database(data,full_reset):
     print('Metrics Deck has been updated.')
 
 
-if __name__ == "__main__":
-    api_key = os.environ['hapikey']
-    hubspot = HubspotApi(api_key)
-
-    all_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage','agent_name',
-                            'appointment_date','top_deal_sources','appointment_type','deal_lead_source',
-                            'deal_marketing_lead_category','hubspot_owner_id','dealtype',
-                            'market_region','run_status','appointment_ran_by','appointment_disposition','swf_lead_id',
-                            'closed_lost_notes','call_center_return_notes','closed_lost_reason','createdate',
-                            'has_been_rescheduled','closed_by_proposal_tool','module_type',
-                            'original_deal_owner','commission','system_size','tesla_powerwall_quantity','tesla_powerwall_revenue',
-                            'module_quantity','closed_lost_date','closedate','cc_notes_important',
-                            'call_center_reschedule_disposition','closed_won_reason','appointment_date_passed',
-                            'promotion_rebate','promotion_discount','sunpower_rebate_adder','financing_fees','mumd_promotion',
-                            'true_promotion','promotion_adder','cac_lead_source','cac_category_lead_source','full_promotion_true_paid_fsp',
-                            'full_promotion_total','full_promotion_mumd_fsp','sunpower_rebate_total','promotion_true_paid_by_fsp',
-                            'promotion_mumd_fsp','promotion_total','utility','canvasser_name','net_revenue','powerwall_split_portion','cash_loan',
-                            'send_deposit_to_accounting','matt_deposit_check','project_sunrise_id','deposit_sent_integration_failure',
-                            'hold_type','powerwall_only','payment_option']          
-
-    results = hubspot.get_all_deals(all_properties)
-    deal_list_raw = hubspot.parse_deals()
-    deal_list = map_deals_list(deal_list_raw)
-    update_task_database(deal_list,full_reset=False)
+update_task_database()

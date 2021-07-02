@@ -1,18 +1,18 @@
 # getting Owner, Sales region, Deal Stage Keys to Map Out Items So It Won't need to be down in subsequent functions
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import numpy as np
+import pandas as pd
+import datetime
+import time
+import sys, os, os.path
+import math
+
+import requests
+import json
+
+
 def map_deals_list(parsed):
-
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-    import numpy as np
-    import pandas as pd
-    import datetime
-    import time
-    import sys, os, os.path
-    import math
-    import requests
-    import json
-
-
 
     # sales regions
     token = os.environ['sheets_token']
@@ -111,16 +111,20 @@ def map_deals_list(parsed):
     df = pd.DataFrame(data=deal_list[1::],columns=deal_list[0])
     
     df['hubspot_owner_id'] = df['hubspot_owner_id'].map(owner_dict)
+    df['original_deal_owner'] = df['original_deal_owner'].map(owner_dict)
     df['dealstage'] = df['dealstage'].map(deal_stage_map)
     df['appointment_ran_by'] = df['appointment_ran_by'].map(owner_dict)
     df['original_deal_owner'] = np.where(df['original_deal_owner'].isnull(),df['hubspot_owner_id'],df['original_deal_owner'])
     
     df['closedate'] = pd.to_datetime(df['closedate'],errors='coerce')-pd.Timedelta('05:00:00')
     df['closedate'] = df['closedate'].apply(date_to_string)
+
     df['createdate'] = pd.to_datetime(df['createdate'],errors='coerce')
     df['createdate'] = df['createdate'].apply(date_to_string)
+
     df['appointment_date'] = pd.to_datetime(df['appointment_date'],errors='coerce')
     df['appointment_date'] = df['appointment_date'].apply(date_to_string)
+
     df['closed_lost_date'] = pd.to_datetime(df['closed_lost_date'],errors='coerce')
     df['closed_lost_date'] = df['closed_lost_date'].apply(date_to_string)
 

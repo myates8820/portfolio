@@ -179,16 +179,19 @@ def run_grab():
     
 
     # Datetime string converter -- Change datetime object to string format
-    df.sort_values(by='five9_create_date',ascending=True,inplace=True)
-    df['createdate'] = df['createdate'].apply(date_to_string)
-    df['five9_create_date'] = df['five9_create_date'].apply(date_to_string)
 
-    df.fillna('',inplace=True)
 
     # modified section to cut down for upload but not to affect old exports
     df = df[['hs_object_id','firstname','lastname','createdate','five9_create_date','num_associated_deals','address','lead_source','swf_lead_id','market_region','qualified_contact',
         'five9_disposition','hubspot_owner_id','top_deal_sources_contacts_','zip','five9_notes','email','phone','cac_lead_source','n3pl_lead_source']]
 
+    # sunpower_df = df[df]
+
+    df.sort_values(by='five9_create_date',ascending=True,inplace=True)
+    df['createdate'] = df['createdate'].apply(date_to_string)
+    df['five9_create_date'] = df['five9_create_date'].apply(date_to_string)
+
+    df.fillna('',inplace=True)
 
     #summarizing for easier upload
 

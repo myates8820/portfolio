@@ -156,6 +156,8 @@ class HubspotApi():
             for i in x:
                 list_results.append(i)
 
+        del full_results
+
         self.deal_properties = property_array
         self.all_deals = list_results
         return list_results
@@ -180,7 +182,8 @@ class HubspotApi():
         return parsed        
 
 if __name__ == "__main__":
-    api_key = open('hapikey.txt').read()
+    with open('hapikey.txt','r') as foo:
+        api_key = foo.read()
     base_properties = ['hs_object_id','dealname','amount_in_home_currency','dealstage','agent_name',
                             'appointment_date','top_deal_sources','appointment_type','deal_lead_source',
                             'deal_marketing_lead_category','hubspot_owner_id','dealtype',
